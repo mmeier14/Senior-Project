@@ -1,0 +1,100 @@
+From: base/archlinux
+Bootstrap: docker
+
+%setup
+
+	# Fix locale
+	echo 'en_GB.UTF-8 UTF-8' > $SINGULARITY_ROOTFS/etc/locale.gen
+
+	mkdir -p $SINGULARITY_ROOTFS/etc/pacman.d/
+	echo 'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' > $SINGULARITY_ROOTFS/etc/pacman.d/mirrorlist
+	echo 'Server = http://mirrors.manchester.m247.com/arch-linux/$repo/os/$arch' >> $SINGULARITY_ROOTFS/etc/pacman.d/mirrorlist
+	echo 'Server = http://www.mirrorservice.org/sites/ftp.archlinux.org/$repo/os/$arch' >> $SINGULARITY_ROOTFS/etc/pacman.d/mirrorlist
+
+	ln -sf $SINGULARITY_ROOTFS/usr/share/zoneinfo/Europe/London $SINGULARITY_ROOTFS/etc/localtime
+
+	cp mpich-3.2.1.tar.gz $SINGULARITY_ROOTFS/mpich-3.2.1.tar.gz
+	
+	cp docksource.tar.gz $SINGULARITY_ROOTFS/docksource.tar.gz
+
+	tar --strip-components=1 --wildcards -xzf docksource.tar.gz dock6/parameters/* --directory parameters
+
+%environment
+	
+	SINGULARITY_BINDPATH="$PWD"
+	
+	export SINGULARITY_BINDPATH
+	
+%post
+
+	# generate locales inside the container
+	locale-gen
+
+	# install necessary utilites using pacman inside the container
+	pacman -Sy --force --noconfirm --needed make
+	pacman -Sy --force --noconfirm --needed gcc
+	pacman -Sy --force --noconfirm --needed gcc-fortran flex
+	pacman -Sy --force --noconfirm --needed bison
+	pacman -Sy --noconfirm git jre8-openjdk-headless
+	pacman -Sy --noconfirm --needed python2
+	ln -s /usr/sbin/python2 /usr/sbin/python
+	
+	# Clean up
+	paccache -r -k0
+
+	#MPICH Installation
+	
+	tar -xzf mpich-3.2.1.tar.gz mpich-3.2.1
+
+	mkdir mpich-install
+
+	mkdir mpich-temp
+
+	cd mpich-temp
+
+	../mpich-3.2.1/configure -prefix=/mpich-install 2>&1 | tee c.txt
+
+	make 2>&1 | tee m.txt
+
+	make install 2>&1 | tee mi.txt
+	
+	make install PACKAGE=mpich-3.2.1
+	
+	make installcheck PACKAGE=mpich-3.2.1
+	
+	echo 'export PATH=$PATH:/mpich-install/bin' >> $SINGULARITY_ENVIRONMENT
+	
+	export PATH=$PATH:/mpich-install/bin
+	
+	#rm  /mpich-install/bin/mpirun
+	#cd  /mpich-install/bin/
+	#cp -p mpiexec.hydra mpirun
+	
+	#DOCK installation
+	
+	cd /
+	
+	tar -xzf docksource.tar.gz dock6
+	
+	cd /dock6
+	
+	cd install
+	
+	./configure gnu
+	
+	make all
+	
+	#DOCK parallel installation
+	
+	echo 'export MPICH_HOME=/mpich-install' >> $SINGULARITY_ENVIRONMENT
+	
+	export MPICH_HOME=/mpich-install
+	
+	./configure gnu.parallel
+	
+	make all
+	
+	export SINGULARITY_BINDPATH="$PWD"
+	
+%runscript
+exec mpirun /dock6/bin/dock6.mpi "$@"
